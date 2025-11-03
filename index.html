@@ -74,7 +74,8 @@
   <script src="https://unpkg.com/pdfjs-dist@4.8.69/build/pdf.min.js"></script>
   <script>
     // Configure worker (uses same CDN version)
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://unpkg.com/pdfjs-dist@4.8.69/build/pdf.worker.min.js";
+    // Prefer jsDelivr (often less blocked by extensions); you can host this file locally too.
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.8.69/build/pdf.worker.min.js";
   </script>
 </head>
 <body>
@@ -346,10 +347,30 @@
       if (!f) return;
       setStatus('loading PDF'); log('Reading file…');
       const buf = await f.arrayBuffer();
-      pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
-      $('#chipPages').textContent = `Pages: ${pdfDoc.numPages}`;
-      setStatus('loaded');
-      log('PDF loaded. You can now paste an excerpt and click "Find Index".');
+      const start = performance.now();
+      try {
+        const loadTimeout = new Promise((_, rej) => setTimeout(() => rej(new Error('PDF worker timeout — likely blocked by an extension or network. See tips below.')), 15000));
+        const loadPromise = pdfjsLib.getDocument({ data: buf }).promise;
+        pdfDoc = await Promise.race([loadPromise, loadTimeout]);
+        const ms = Math.round(performance.now() - start);
+        $('#chipPages').textContent = `Pages: ${pdfDoc.numPages}`;
+        setStatus('loaded');
+        log(`PDF loaded in ${ms} ms. You can now paste an excerpt and click "Find Index".`);
+      } catch (err) {
+        setStatus('error');
+        log('Error loading PDF: ' + err.message);
+        const help = document.createElement('div');
+        help.className = 'result';
+        help.innerHTML = `<h3 style="color:var(--danger)">Could not load the PDF</h3>
+          <div class="hint">This usually happens because the PDF worker script was blocked by an ad‑blocker, corporate proxy, or CDN issue. Try these fixes:<ol>
+            <li>Disable ad‑blockers/privacy extensions for this page and hard‑refresh (Ctrl/Cmd+Shift+R).</li>
+            <li>Use Chrome/Edge in an Incognito window (no extensions).</li>
+            <li>Host the worker locally: download <code>pdf.worker.min.js</code> from <code>pdfjs-dist@4.8.69</code> into your repo and set <code>workerSrc = './pdf.worker.min.js'</code>.</li>
+            <li>Try a smaller PDF to confirm the app works, then re‑open the large one.</li>
+          </ol></div>`;
+        document.querySelector('#results').prepend(help);
+        return;
+      }
     });
 
     $('#btnIndex').addEventListener('click', async () => {
@@ -422,3 +443,4 @@
   </script>
 </body>
 </html>
+
